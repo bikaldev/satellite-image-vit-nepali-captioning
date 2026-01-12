@@ -1,0 +1,99 @@
+# Configuration for Satellite Image Classification and Captioning
+
+# Data paths
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  output_dir: "outputs"
+  
+# Classes
+classes:
+  names_english: ["airport", "pond", "mountain", "farmland", "river", "residential", "playground", "forest"]
+  names_nepali: ["विमानस्थल", "पोखरी", "पहाड", "खेतीयोग्य भूमि", "नदी", "आवासीय क्षेत्र", "खेळमैदान", "वन"]
+  num_classes: 8
+
+# Translation settings
+translation:
+  method: "indictrans2"  # offline translation
+  source_lang: "eng_Latn"
+  target_lang: "npi_Deva"  # Nepali in Devanagari script
+  batch_size: 32
+  cache_dir: "outputs/translation/cache"
+
+# Image preprocessing
+image:
+  size: 224
+  mean: [0.485, 0.456, 0.406]  # ImageNet normalization
+  std: [0.229, 0.224, 0.225]
+
+# Data augmentation
+augmentation:
+  train:
+    random_crop: true
+    horizontal_flip: true
+    vertical_flip: false
+    rotation_degrees: 15
+    color_jitter:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.2
+      hue: 0.1
+  
+# Classification model
+classifier:
+  model_name: "google/vit-base-patch16-224"
+  num_classes: 8
+  dropout: 0.1
+  freeze_backbone_epochs: 2  # Fine-tune only head for first N epochs
+  
+# Captioning model
+captioner:
+  encoder_model: "google/vit-base-patch16-224"
+  decoder_model: "gpt2"
+  max_length: 128
+  num_beams: 5
+  early_stopping: true
+  
+# Training - Classification
+train_classifier:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 5
+  gradient_clip: 1.0
+  mixed_precision: true
+  
+# Training - Captioning
+train_captioner:
+  batch_size: 16
+  epochs: 30
+  learning_rate: 0.00005
+  weight_decay: 0.01
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 3
+  gradient_clip: 1.0
+  mixed_precision: true
+  teacher_forcing_ratio: 1.0
+  
+# Evaluation
+evaluation:
+  batch_size: 32
+  metrics:
+    classification: ["accuracy", "precision", "recall", "f1", "confusion_matrix", "roc_auc"]
+    captioning: ["bleu", "meteor", "cider", "rouge", "diversity"]
+  
+# Logging
+logging:
+  tensorboard: true
+  wandb: false
+  log_interval: 10  # log every N batches
+  save_interval: 1  # save checkpoint every N epochs
+  
+# Device
+device: "cuda"  # or "cpu"
+num_workers: 4
+seed: 42

@@ -1,0 +1,50 @@
+# Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0
+accelerate>=0.20.0
+
+# Translation (Offline) - IndicTrans2
+# Note: Install IndicTrans2 separately with: pip install git+https://github.com/AI4Bharat/IndicTrans2.git
+sentencepiece>=0.1.99
+sacremoses>=0.0.53
+mosestokenizer>=1.2.1
+ctranslate2>=3.16.0
+protobuf>=3.20.0
+
+# Data Processing
+datasets>=2.12.0
+pillow>=9.5.0
+pandas>=2.0.0
+numpy>=1.24.0
+opencv-python>=4.7.0
+
+# Evaluation Metrics
+scikit-learn>=1.2.0
+nltk>=3.8
+pycocoevalcap>=1.2
+rouge-score>=0.1.2
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+wordcloud>=1.9.0
+
+# Monitoring and Logging
+tensorboard>=2.13.0
+tqdm>=4.65.0
+wandb>=0.15.0
+
+# Utilities
+pyyaml>=6.0
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+
+# Report Generation
+jinja2>=3.1.0
+weasyprint>=59.0
+
+# Additional utilities
+requests>=2.31.0
+beautifulsoup4>=4.12.0
