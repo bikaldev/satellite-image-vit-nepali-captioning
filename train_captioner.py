@@ -217,7 +217,7 @@ def main(args):
     # Create datasets
     print("\n=== Loading Datasets ===")
     train_dataset = SatelliteCaptioningDataset(
-        csv_file=f"{config['data']['processed_dir']}/train_nepali.csv",  # Use translated captions
+        csv_file=f"{config['data']['processed_dir']}/train.csv",  # Use new dataset split
         root_dir=config['data']['raw_dir'],
         transform=get_train_transforms(config['image']['size']),
         use_nepali_captions=True,
@@ -225,7 +225,7 @@ def main(args):
     )
     
     val_dataset = SatelliteCaptioningDataset(
-        csv_file=f"{config['data']['processed_dir']}/valid_nepali.csv",
+        csv_file=f"{config['data']['processed_dir']}/valid.csv",
         root_dir=config['data']['raw_dir'],
         transform=get_val_transforms(config['image']['size']),
         use_nepali_captions=True,

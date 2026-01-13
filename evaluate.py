@@ -291,7 +291,7 @@ def main(args):
         
         # Load dataset
         dataset = SatelliteCaptioningDataset(
-            csv_file=f"{config['data']['processed_dir']}/{args.split}_nepali.csv",
+            csv_file=f"{config['data']['processed_dir']}/{args.split}.csv",
             root_dir=config['data']['raw_dir'],
             transform=get_val_transforms(config['image']['size']),
             use_nepali_captions=True,

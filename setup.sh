@@ -21,11 +21,7 @@ echo ""
 echo "Installing dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Install IndicTrans2 from GitHub
-echo ""
-echo "Installing IndicTrans2 from GitHub..."
-pip install git+https://github.com/AI4Bharat/IndicTrans2.git
+pip install openpyxl  # Needed for Excel files
 
 echo ""
 echo "=========================================="
@@ -34,8 +30,8 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Translate captions to Nepali:"
-echo "   python scripts/translate_captions.py --input data/processed/train.csv --output data/processed/train_nepali.csv"
+echo "1. Split the Nepali Excel dataset:"
+echo "   ./run_split_dataset.sh"
 echo ""
 echo "2. Train classification model:"
 echo "   python train_classifier.py --config configs/config.yaml --output_dir outputs/classification"

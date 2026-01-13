@@ -49,13 +49,15 @@ class ViTCaptioner(nn.Module):
             decoder_model
         )
         
-        # Set decoder start token
-        self.model.config.decoder_start_token_id = self.model.config.decoder.bos_token_id
-        self.model.config.pad_token_id = self.model.config.decoder.pad_token_id
-        
-        # Initialize tokenizer
+        # Initialize tokenizer first
         self.tokenizer = AutoTokenizer.from_pretrained(decoder_model)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        # Set model config tokens
+        self.model.config.pad_token_id = self.tokenizer.pad_token_id
+        self.model.config.decoder_start_token_id = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
+        self.model.config.eos_token_id = self.tokenizer.eos_token_id
         
         # Generation config
         self.generation_config = GenerationConfig(

@@ -1,102 +1,89 @@
-"""
-Split the combined dataset.csv into train/valid/test splits.
-This script reads the combined dataset and creates separate CSV files
-based on the filepath column (train/, valid/, test/ prefixes).
-"""
-
 import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+import re
 import os
-from pathlib import Path
+import ast
 
-# Paths
-data_dir = Path("data/processed")
-input_file = data_dir / "dataset.csv"
-output_dir = data_dir
+def clean_captions(cap_str):
+    """
+    Cleans the numpy-like string representation of captions into a proper Python list string.
+    Example input: "['विमानस्थलमा ...'\n 'एयरपोर्टमा ...']"
+    """
+    if not isinstance(cap_str, str):
+        return str([str(cap_str)])
+    
+    # Remove outer brackets
+    s = cap_str.strip()
+    if s.startswith('[') and s.endswith(']'):
+        s = s[1:-1]
+    
+    # Extract text between quotes
+    # Handles both ' and " cases, and ignores newlines/spaces between
+    captions = re.findall(r"'(.*?)'", s, re.DOTALL)
+    if not captions:
+        captions = re.findall(r'"(.*?)"', s, re.DOTALL)
+    
+    if not captions:
+        return str([s])
+    
+    # Remove newlines and extra spaces within each caption
+    captions = [c.replace('\n', ' ').strip() for c in captions]
+    
+    return str(captions)
 
-# Read combined dataset
-print(f"Reading combined dataset from {input_file}...")
-df = pd.read_csv(input_file)
+def main():
+    input_file = 'data/raw/newdataset_nepali .xlsx'
+    output_dir = 'data/processed'
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    print(f"Reading {input_file}...")
+    df = pd.read_excel(input_file)
+    
+    # Class name mapping (English to Nepali)
+    class_map = {
+        'airport': 'विमानस्थल',
+        'pond': 'पोखरी',
+        'mountain': 'पहाड',
+        'farmland': 'खेतीयोग्य भूमि',
+        'river': 'नदी',
+        'residential': 'आवासीय क्षेत्र',
+        'playground': 'खेळमैदान',
+        'forest': 'वन'
+    }
+    
+    if 'class' in df.columns:
+        print("Mapping class names to Nepali...")
+        df['class'] = df['class'].map(class_map)
+    
+    # Clean captions and captions_nepali columns if they exist
+    if 'captions_nepali' in df.columns:
+        df['captions_nepali'] = df['captions_nepali'].apply(clean_captions)
+    
+    if 'captions' in df.columns:
+        df['captions'] = df['captions'].apply(clean_captions)
+    
+    # Remove Unnamed: 0 if present
+    if 'Unnamed: 0' in df.columns:
+        df = df.drop(columns=['Unnamed: 0'])
+    
+    # Split: 80% train, 10% val, 10% test
+    print("Splitting dataset...")
+    train_df, temp_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['class'] if 'class' in df.columns else None)
+    val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['class'] if 'class' in temp_df.columns else None)
+    
+    print(f"Train size: {len(train_df)}")
+    print(f"Val size: {len(val_df)}")
+    print(f"Test size: {len(test_df)}")
+    
+    # Save to CSV
+    train_df.to_csv(os.path.join(output_dir, 'train.csv'), index=False)
+    val_df.to_csv(os.path.join(output_dir, 'valid.csv'), index=False)
+    test_df.to_csv(os.path.join(output_dir, 'test.csv'), index=False)
+    
+    print(f"Successfully saved splits to {output_dir}")
 
-print(f"Total rows: {len(df)}")
-print(f"Columns: {df.columns.tolist()}")
-
-# Check if class column exists, if not create it from filepath
-if 'class' not in df.columns:
-    print("\nWarning: 'class' column not found. Extracting from filepath...")
-    import re
-    def extract_class(filepath):
-        fname = os.path.basename(filepath)
-        match = re.match(r"([a-zA-Z]+)_[0-9]+\.jpg", fname)
-        if match:
-            return match.group(1).lower()
-        return None
-    df['class'] = df['filepath'].apply(extract_class)
-
-# Define class mappings
-relevant_classes = ["airport", "pond", "mountain", "farmland", "river", "residential", "playground", "forest"]
-eng_to_nep = {
-    "airport": "विमानस्थल",
-    "pond": "पोखरी",
-    "mountain": "पहाड",
-    "farmland": "खेतीयोग्य भूमि",
-    "river": "नदी",
-    "residential": "आवासीय क्षेत्र",
-    "playground": "खेळमैदान",
-    "forest": "वन"
-}
-
-# Merge subclasses
-merge_map = {
-    "sparseresidential": "residential",
-    "denseresidential": "residential",
-    "mediumresidential": "residential"
-}
-df['class'] = df['class'].replace(merge_map)
-
-# Filter to relevant classes only
-print(f"\nFiltering to relevant classes: {relevant_classes}")
-df = df[df['class'].isin(relevant_classes)].reset_index(drop=True)
-print(f"Rows after filtering: {len(df)}")
-
-# Convert class names to Nepali
-print("\nConverting class names to Nepali...")
-df['class'] = df['class'].map(eng_to_nep)
-
-# Split based on filepath prefix
-print("\nSplitting dataset based on filepath...")
-
-train_df = df[df['filepath'].str.startswith('train/')].reset_index(drop=True)
-valid_df = df[df['filepath'].str.startswith('valid/')].reset_index(drop=True)
-test_df = df[df['filepath'].str.startswith('test/')].reset_index(drop=True)
-
-print(f"Train samples: {len(train_df)}")
-print(f"Valid samples: {len(valid_df)}")
-print(f"Test samples: {len(test_df)}")
-
-# Display class distribution
-print("\n=== Class Distribution ===")
-print("\nTrain:")
-print(train_df['class'].value_counts())
-print("\nValid:")
-print(valid_df['class'].value_counts())
-print("\nTest:")
-print(test_df['class'].value_counts())
-
-# Save splits
-print(f"\n=== Saving splits to {output_dir} ===")
-
-train_file = output_dir / "train.csv"
-valid_file = output_dir / "valid.csv"
-test_file = output_dir / "test.csv"
-
-train_df.to_csv(train_file, index=False)
-valid_df.to_csv(valid_file, index=False)
-test_df.to_csv(test_file, index=False)
-
-print(f"✓ Saved {train_file} ({len(train_df)} rows)")
-print(f"✓ Saved {valid_file} ({len(valid_df)} rows)")
-print(f"✓ Saved {test_file} ({len(test_df)} rows)")
-
-print("\n=== Split complete! ===")
-print("\nNext step: Translate captions to Nepali")
-print("  python scripts/translate_captions.py --input data/processed/train.csv --output data/processed/train_nepali.csv")
+if __name__ == "__main__":
+    main()

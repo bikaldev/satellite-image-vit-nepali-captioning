@@ -1,8 +1,8 @@
 #!/bin/bash
-# Split the combined dataset.csv into train/valid/test splits
+# Split the new Nepali Excel dataset into train/valid/test splits
 
 echo "=========================================="
-echo "Splitting Combined Dataset"
+echo "Splitting New Nepali Dataset"
 echo "=========================================="
 echo ""
 
@@ -17,7 +17,7 @@ fi
 
 # Run split script
 echo ""
-echo "Splitting data/processed/dataset.csv into train/valid/test..."
+echo "Splitting data/raw/newdataset_nepali .xlsx into train/valid/test..."
 echo ""
 
 python3 scripts/split_dataset.py
@@ -31,8 +31,9 @@ if [ $? -eq 0 ]; then
     echo "Generated files:"
     ls -lh data/processed/train.csv data/processed/valid.csv data/processed/test.csv
     echo ""
-    echo "Next step: Translate captions to Nepali"
-    echo "  python scripts/translate_captions.py --input data/processed/train.csv --output data/processed/train_nepali.csv"
+    echo "Next step: Train models"
+    echo "  python train_classifier.py --config configs/config.yaml"
+    echo "  python train_captioner.py --config configs/config.yaml"
 else
     echo ""
     echo "Error: Dataset split failed. Please check the error messages above."

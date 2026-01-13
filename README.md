@@ -6,7 +6,7 @@ A comprehensive deep learning project for satellite image analysis using Vision 
 
 - **Dual-Task Learning**: Classification (8 classes) + Image Captioning
 - **Vision Transformer Architecture**: State-of-the-art ViT models for both tasks
-- **Nepali Language Support**: Full Nepali captions using offline IndicTrans2 translation
+- **Nepali Language Support**: Full Nepali captions using pre-translated dataset
 - **Comprehensive Analysis**: Extensive preprocessing analysis, training monitoring, and evaluation
 - **Production-Ready**: Complete inference pipeline with visualization
 
@@ -42,9 +42,7 @@ env\Scripts\activate  # On Windows
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Install IndicTrans2 from GitHub (for offline translation)
-pip install git+https://github.com/AI4Bharat/IndicTrans2.git
+pip install openpyxl
 ```
 
 **Or use the setup script:**
@@ -54,47 +52,19 @@ pip install git+https://github.com/AI4Bharat/IndicTrans2.git
 
 ### Data Preparation
 
-1. **Split Combined Dataset** (Create train/valid/test CSV files):
+1. **Split Nepali Excel Dataset** (Create train/valid/test CSV files):
 ```bash
 ./run_split_dataset.sh
 ```
 
 This will:
-- Read `data/processed/dataset.csv`
-- Filter to 8 relevant classes
-- Convert class labels to Nepali
-- Split into train/valid/test based on filepath
+- Read `data/raw/newdataset_nepali .xlsx`
+- Clean and format Nepali captions
+- Split into train/valid/test (80/10/10)
 - Create:
   - `data/processed/train.csv`
   - `data/processed/valid.csv`
   - `data/processed/test.csv`
-
-2. **Translate Captions to Nepali** (Offline using IndicTrans2):
-```bash
-# Activate virtual environment
-source env/bin/activate
-
-# Set your HuggingFace token
-export HF_TOKEN="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"
-
-# Translate each split
-python scripts/translate_captions.py \
-    --input data/processed/train.csv \
-    --output data/processed/train_nepali.csv \
-    --hf_token $HF_TOKEN
-
-python scripts/translate_captions.py \
-    --input data/processed/valid.csv \
-    --output data/processed/valid_nepali.csv \
-    --hf_token $HF_TOKEN
-
-python scripts/translate_captions.py \
-    --input data/processed/test.csv \
-    --output data/processed/test_nepali.csv \
-    --hf_token $HF_TOKEN
-```
-
-**Note**: Replace the token with your own HuggingFace access token if needed.
 
 ## 🎯 Training
 
@@ -188,7 +158,7 @@ python inference.py \
 │   ├── vit_classifier.py        # ViT classification model
 │   └── vit_captioner.py         # ViT captioning model
 ├── scripts/
-│   └── translate_captions.py    # Offline translation pipeline
+│   └── split_dataset.py         # Dataset splitting logic
 ├── utils/
 │   ├── text_preprocessing.py    # Nepali text utilities
 │   └── visualize.py             # Visualization functions
@@ -231,8 +201,7 @@ Edit `configs/config.yaml` to customize:
 ## 🛠️ Key Technologies
 
 - **PyTorch**: Deep learning framework
-- **Transformers (HuggingFace)**: ViT models
-- **IndicTrans2**: Offline English→Nepali translation
+- **Transformers (HuggingFace)**: ViT and GPT-2 models
 - **TensorBoard**: Training visualization
 - **NLTK**: Caption evaluation metrics
 - **Scikit-learn**: Classification metrics
