@@ -1,0 +1,26 @@
+------------------------------------------
+Step 2: Training Captioning Model
+------------------------------------------
+Note: This will use the best checkpoint from classification if configured,
+      but primarily trains the independent captioner module.
+Traceback (most recent call last):
+  File "C:\Users\User\Documents\Satellite Image\satellite-image-vit-nepali-captioning\train_captioner.py", line 25, in <module>
+    nltk.data.find('tokenizers/punkt')
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\Documents\Satellite Image\satellite-image-vit-nepali-captioning\env\Lib\site-packages\nltk\data.py", line 551, in find
+    return find(modified_name, paths)
+  File "C:\Users\User\Documents\Satellite Image\satellite-image-vit-nepali-captioning\env\Lib\site-packages\nltk\data.py", line 538, in find
+    return ZipFilePathPointer(p, zipentry)
+  File "C:\Users\User\Documents\Satellite Image\satellite-image-vit-nepali-captioning\env\Lib\site-packages\nltk\data.py", line 391, in __init__
+    zipfile = OpenOnDemandZipFile(os.path.abspath(zipfile))
+  File "C:\Users\User\Documents\Satellite Image\satellite-image-vit-nepali-captioning\env\Lib\site-packages\nltk\data.py", line 1020, in __init__
+    zipfile.ZipFile.__init__(self, filename)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\User\anaconda3\Lib\zipfile\__init__.py", line 1385, in __init__
+    self._RealGetContents()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\User\anaconda3\Lib\zipfile\__init__.py", line 1452, in _RealGetContents
+    raise BadZipFile("File is not a zip file")
+zipfile.BadZipFile: File is not a zip file
+Error: Captioning training failed!
+

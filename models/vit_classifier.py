@@ -133,7 +133,7 @@ class ViTClassifier(nn.Module):
     @classmethod
     def load_checkpoint(cls, path: str, device: str = 'cuda'):
         """Load model from checkpoint."""
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
         
         model = cls(
             model_name=checkpoint['model_name'],

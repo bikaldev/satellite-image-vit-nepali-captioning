@@ -47,7 +47,7 @@ class SatelliteImageAnalyzer:
         self.device = device if torch.cuda.is_available() else 'cpu'
         
         # Load config
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         
         # Load class names

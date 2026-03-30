@@ -239,7 +239,7 @@ def evaluate_captioner(model, dataloader, device, output_dir):
 
 def main(args):
     # Load config
-    with open(args.config, 'r') as f:
+    with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

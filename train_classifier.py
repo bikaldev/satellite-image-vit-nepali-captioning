@@ -179,11 +179,23 @@ def validate(model, dataloader, criterion, device, class_names):
 
 def main(args):
     # Load config
-    with open(args.config, 'r') as f:
+    with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Set device
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"\n[INFO] CUDA is available. Using device: {torch.cuda.get_device_name(0)}")
+        print(f"[INFO] CUDA Version: {torch.version.cuda}")
+        print(f"[INFO] CuDNN Version: {torch.backends.cudnn.version()}")
+        torch.backends.cudnn.benchmark = True
+        print("[INFO] Enabled CuDNN benchmark for performance")
+    else:
+        device = torch.device('cpu')
+        print("\n[WARNING] CUDA is NOT available. Using device: cpu")
+        print("[INFO] Please check your PyTorch installation and NVIDIA drivers if you have a GPU.")
+
     print(f"Using device: {device}")
     
     # Set random seed

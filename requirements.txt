@@ -1,6 +1,7 @@
-# Deep Learning Framework
-torch>=2.0.0
-torchvision>=0.15.0
+# Deep Learning Framework (RTX 5090 / CUDA 12.8)
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch>=2.5.0
+torchvision>=0.20.0
 transformers>=4.30.0
 accelerate>=0.20.0
 

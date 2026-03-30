@@ -208,7 +208,7 @@ class ViTCaptioner(nn.Module):
     def load_checkpoint(cls, path: str, device: str = 'cuda'):
         """Load model from checkpoint."""
         # Load checkpoint info
-        checkpoint_info = torch.load(f"{path}/checkpoint_info.pt", map_location=device)
+        checkpoint_info = torch.load(f"{path}/checkpoint_info.pt", map_location=device, weights_only=False)
         
         # Create model instance
         model = cls(

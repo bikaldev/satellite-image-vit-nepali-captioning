@@ -21,11 +21,20 @@ from nltk.translate.meteor_score import meteor_score
 import nltk
 
 # Download NLTK data
+# Force fresh download to avoid corrupt zip file issues
+import ssl
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('wordnet')
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+# Download required NLTK data (force=True to overwrite corrupt files)
+nltk.download('punkt', quiet=True, force=True)
+nltk.download('punkt_tab', quiet=True, force=True)
+nltk.download('wordnet', quiet=True, force=True)
+nltk.download('omw-1.4', quiet=True, force=True)
 
 # Import local modules
 from models.vit_captioner import ViTCaptioner
@@ -193,7 +202,7 @@ def validate(model, dataloader, device, class_names):
 
 def main(args):
     # Load config
-    with open(args.config, 'r') as f:
+    with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
     # Set device
@@ -232,15 +241,39 @@ def main(args):
         class_names_nepali=class_names
     )
     
-    # Create model first to get tokenizer
-    print("\n=== Creating Model ===")
-    model = ViTCaptioner(
-        encoder_model=config['captioner']['encoder_model'],
-        decoder_model=config['captioner']['decoder_model'],
-        max_length=config['captioner']['max_length'],
-        num_beams=config['captioner']['num_beams']
-    )
-    model = model.to(device)
+    # Check if resuming from checkpoint
+    start_epoch = 0
+    checkpoint_info = None
+    
+    if args.resume_from:
+        print(f"\n=== Resuming from Checkpoint: {args.resume_from} ===")
+        checkpoint_path = output_dir / 'checkpoints' / args.resume_from
+        
+        if not checkpoint_path.exists():
+            raise ValueError(f"Checkpoint not found: {checkpoint_path}")
+        
+        # Load model from checkpoint
+        model, loaded_epoch = ViTCaptioner.load_checkpoint(str(checkpoint_path), device=str(device))
+        checkpoint_info = torch.load(checkpoint_path / "checkpoint_info.pt", map_location=device, weights_only=False)
+        
+        start_epoch = loaded_epoch + 1
+        print(f"✓ Loaded checkpoint from epoch {loaded_epoch}")
+        print(f"✓ Will resume training from epoch {start_epoch + 1}")
+        
+        if 'metrics' in checkpoint_info:
+            metrics = checkpoint_info['metrics']
+            print(f"  Previous BLEU-4: {metrics.get('bleu4', 'N/A')}")
+            print(f"  Previous Loss: {metrics.get('loss', 'N/A')}")
+    else:
+        # Create model from scratch
+        print("\n=== Creating Model ===")
+        model = ViTCaptioner(
+            encoder_model=config['captioner']['encoder_model'],
+            decoder_model=config['captioner']['decoder_model'],
+            max_length=config['captioner']['max_length'],
+            num_beams=config['captioner']['num_beams']
+        )
+        model = model.to(device)
     
     # Create dataloaders with custom collate function
     from functools import partial
@@ -278,6 +311,16 @@ def main(args):
         eta_min=1e-6
     )
     
+    # Load optimizer and scheduler states if resuming
+    if checkpoint_info is not None and 'optimizer_state_dict' in checkpoint_info:
+        optimizer.load_state_dict(checkpoint_info['optimizer_state_dict'])
+        print("✓ Loaded optimizer state")
+        
+        # Step scheduler to the correct position
+        for _ in range(start_epoch):
+            scheduler.step()
+        print(f"✓ Advanced scheduler to epoch {start_epoch}")
+    
     # Mixed precision scaler
     scaler = torch.cuda.amp.GradScaler() if config['train_captioner']['mixed_precision'] else None
     
@@ -296,10 +339,28 @@ def main(args):
         'lr': []
     }
     
-    best_bleu4 = 0.0
+    # Load existing training history if resuming
+    history_file = output_dir / 'training_history.csv'
+    if args.resume_from and history_file.exists():
+        print("\n=== Loading Training History ===")
+        history_df = pd.read_csv(history_file)
+        
+        # Convert back to dictionary format
+        for key in history.keys():
+            if key in history_df.columns:
+                history[key] = history_df[key].tolist()
+        
+        print(f"✓ Loaded {len(history['train_loss'])} epochs of history")
+    
+    # Track best BLEU-4 (from history if resuming)
+    best_bleu4 = max(history['bleu4']) if history['bleu4'] else 0.0
     
     print("\n=== Starting Training ===")
-    for epoch in range(config['train_captioner']['epochs']):
+    if args.resume_from:
+        print(f"Resuming from epoch {start_epoch + 1}/{config['train_captioner']['epochs']}")
+        print(f"Best BLEU-4 so far: {best_bleu4:.4f}")
+    
+    for epoch in range(start_epoch, config['train_captioner']['epochs']):
         print(f"\nEpoch {epoch+1}/{config['train_captioner']['epochs']}")
         print("-" * 50)
         
@@ -391,6 +452,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train satellite image captioning model")
     parser.add_argument('--config', type=str, default='configs/config.yaml', help='Path to config file')
     parser.add_argument('--output_dir', type=str, default='outputs/captioning', help='Output directory')
+    parser.add_argument('--resume_from', type=str, default=None, help='Checkpoint directory name to resume from (e.g., "epoch_8" or "best_bleu_model")')
     
     args = parser.parse_args()
     main(args)

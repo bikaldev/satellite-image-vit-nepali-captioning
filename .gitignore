@@ -25,8 +25,6 @@ share/python-wheels/
 MANIFEST
 
 # Data and Outputs
-data/processed/
-data/raw/
 outputs/
 results/
 *.csv
@@ -35,6 +33,10 @@ results/
 *.png
 *.jpg
 *.jpeg
+
+# Allow data directory files
+!data/
+!data/**
 
 # Tensorboard
 logs/
