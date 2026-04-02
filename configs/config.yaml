@@ -49,7 +49,7 @@ classifier:
 # Captioning model
 captioner:
   encoder_model: "google/vit-base-patch16-224"
-  decoder_model: "gpt2"
+  decoder_model: "ai-forever/mGPT"
   max_length: 128
   num_beams: 5
   early_stopping: true
@@ -68,7 +68,7 @@ train_classifier:
   
 # Training - Captioning
 train_captioner:
-  batch_size: 16
+  batch_size: 8
   epochs: 30
   learning_rate: 0.00005
   weight_decay: 0.01
@@ -81,7 +81,7 @@ train_captioner:
   
 # Evaluation
 evaluation:
-  batch_size: 32
+  batch_size: 4
   metrics:
     classification: ["accuracy", "precision", "recall", "f1", "confusion_matrix", "roc_auc"]
     captioning: ["bleu", "meteor", "cider", "rouge", "diversity"]
@@ -95,5 +95,5 @@ logging:
   
 # Device
 device: "cuda"  # or "cpu"
-num_workers: 4
+num_workers: 0
 seed: 42

@@ -1,6 +1,9 @@
 """
-Training script for satellite image captioning using ViT encoder and GPT-2 decoder.
-Includes comprehensive monitoring, BLEU score tracking, and sample caption generation.
+Refined training script for satellite image captioning.
+Features:
+- Comprehensive metrics: BLEU 1-4, METEOR, ROUGE-L.
+- Storage efficiency: Keeps only the 'best' and 'last' checkpoint tensors.
+- Environment-aware execution.
 """
 
 import os
@@ -16,12 +19,13 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import json
-from nltk.translate.bleu_score import corpus_bleu, sentence_bleu
+import shutil
+from nltk.translate.bleu_score import corpus_bleu
 from nltk.translate.meteor_score import meteor_score
+from rouge_score import rouge_scorer
 import nltk
 
-# Download NLTK data
-# Force fresh download to avoid corrupt zip file issues
+# Download required NLTK data
 import ssl
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -30,11 +34,9 @@ except AttributeError:
 else:
     ssl._create_default_https_context = _create_unverified_https_context
 
-# Download required NLTK data (force=True to overwrite corrupt files)
-nltk.download('punkt', quiet=True, force=True)
-nltk.download('punkt_tab', quiet=True, force=True)
-nltk.download('wordnet', quiet=True, force=True)
-nltk.download('omw-1.4', quiet=True, force=True)
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+nltk.download('omw-1.4', quiet=True)
 
 # Import local modules
 from models.vit_captioner import ViTCaptioner
@@ -42,56 +44,9 @@ from data_loaders.dataset import SatelliteCaptioningDataset, collate_fn_captioni
 from data_loaders.transforms import get_train_transforms, get_val_transforms
 import matplotlib.pyplot as plt
 
-
-def plot_training_curves(history, save_path):
-    """Plot captioning training curves."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    
-    # Loss curves
-    axes[0, 0].plot(history['train_loss'], label='Train Loss', linewidth=2)
-    axes[0, 0].plot(history['val_loss'], label='Val Loss', linewidth=2)
-    axes[0, 0].set_xlabel('Epoch')
-    axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].set_title('Loss Curves')
-    axes[0, 0].legend()
-    axes[0, 0].grid(alpha=0.3)
-    
-    # BLEU scores
-    for i, bleu_key in enumerate(['bleu1', 'bleu2', 'bleu3', 'bleu4']):
-        if bleu_key in history:
-            axes[0, 1].plot(history[bleu_key], label=f'BLEU-{i+1}', linewidth=2)
-    axes[0, 1].set_xlabel('Epoch')
-    axes[0, 1].set_ylabel('BLEU Score')
-    axes[0, 1].set_title('BLEU Scores')
-    axes[0, 1].legend()
-    axes[0, 1].grid(alpha=0.3)
-    
-    # METEOR score
-    if 'meteor' in history:
-        axes[1, 0].plot(history['meteor'], linewidth=2, color='green')
-        axes[1, 0].set_xlabel('Epoch')
-        axes[1, 0].set_ylabel('METEOR Score')
-        axes[1, 0].set_title('METEOR Score')
-        axes[1, 0].grid(alpha=0.3)
-    
-    # Learning rate
-    if 'lr' in history:
-        axes[1, 1].plot(history['lr'], linewidth=2, color='orange')
-        axes[1, 1].set_xlabel('Epoch')
-        axes[1, 1].set_ylabel('Learning Rate')
-        axes[1, 1].set_title('Learning Rate Schedule')
-        axes[1, 1].grid(alpha=0.3)
-        axes[1, 1].set_yscale('log')
-    
-    plt.suptitle('Captioning Training Progress', fontsize=16, fontweight='bold')
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-
-
-def compute_bleu_scores(references, hypotheses):
-    """Compute BLEU-1, BLEU-2, BLEU-3, BLEU-4 scores."""
-    # Tokenize
+def compute_metrics(references, hypotheses):
+    """Compute BLEU 1-4, METEOR, and ROUGE-L."""
+    # Tokenize for BLEU
     refs_tokenized = [[ref.split()] for ref in references]
     hyps_tokenized = [hyp.split() for hyp in hypotheses]
     
@@ -100,39 +55,51 @@ def compute_bleu_scores(references, hypotheses):
     bleu3 = corpus_bleu(refs_tokenized, hyps_tokenized, weights=(0.33, 0.33, 0.33, 0))
     bleu4 = corpus_bleu(refs_tokenized, hyps_tokenized, weights=(0.25, 0.25, 0.25, 0.25))
     
-    return bleu1, bleu2, bleu3, bleu4
-
-
-def compute_meteor_score(references, hypotheses):
-    """Compute average METEOR score."""
-    scores = []
+    # METEOR
+    meteor_scores = []
     for ref, hyp in zip(references, hypotheses):
         try:
-            score = meteor_score([ref.split()], hyp.split())
-            scores.append(score)
+            m_score = meteor_score([ref.split()], hyp.split())
+            meteor_scores.append(m_score)
         except:
-            scores.append(0.0)
-    return np.mean(scores)
+            meteor_scores.append(0.0)
+    avg_meteor = np.mean(meteor_scores)
+    
+    # ROUGE-L
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rouge_scores = []
+    for ref, hyp in zip(references, hypotheses):
+        scores = scorer.score(ref, hyp)
+        rouge_scores.append(scores['rougeL'].fmeasure)
+    avg_rouge = np.mean(rouge_scores)
+    
+    return {
+        'bleu1': bleu1,
+        'bleu2': bleu2,
+        'bleu3': bleu3,
+        'bleu4': bleu4,
+        'meteor': avg_meteor,
+        'rougeL': avg_rouge
+    }
 
-
-def train_one_epoch(model, dataloader, optimizer, device, scaler=None):
-    """Train for one epoch."""
+def train_one_epoch(model, dataloader, optimizer, device, scaler=None, resume_batch=0, save_callback=None):
     model.train()
     running_loss = 0.0
-    
     pbar = tqdm(dataloader, desc='Training')
-    for batch in pbar:
+    
+    for i, batch in enumerate(pbar):
+        if i < resume_batch:
+            continue
+            
         pixel_values = batch['pixel_values'].to(device)
         labels = batch['labels'].to(device)
         
         optimizer.zero_grad()
-        
-        # Mixed precision training
         if scaler is not None:
-            with torch.cuda.amp.autocast():
+            # Use torch.amp.autocast('cuda') for modern PyTorch
+            with torch.amp.autocast('cuda'):
                 outputs = model(pixel_values=pixel_values, labels=labels)
                 loss = outputs['loss']
-            
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -143,316 +110,205 @@ def train_one_epoch(model, dataloader, optimizer, device, scaler=None):
             optimizer.step()
         
         running_loss += loss.item() * pixel_values.size(0)
-        pbar.set_postfix({'loss': loss.item()})
+        pbar.set_postfix({'loss': f"{loss.item():.4f}"})
+        
+        # Periodic check for saving (e.g., every 50 batches)
+        if save_callback and (i + 1) % 50 == 0:
+            save_callback(i + 1)
     
-    epoch_loss = running_loss / len(dataloader.dataset)
-    return epoch_loss
+    return running_loss / len(dataloader.dataset)
 
-
-def validate(model, dataloader, device, class_names):
-    """Validate model and generate sample captions."""
+def validate(model, dataloader, device):
     model.eval()
     running_loss = 0.0
-    all_references = []
-    all_hypotheses = []
-    sample_results = []
+    all_refs = []
+    all_hyps = []
+    
+    # Clear cache before generation
+    torch.cuda.empty_cache()
     
     with torch.no_grad():
-        for i, batch in enumerate(tqdm(dataloader, desc='Validation')):
+        for batch in tqdm(dataloader, desc='Validation'):
             pixel_values = batch['pixel_values'].to(device)
             labels = batch['labels'].to(device)
             
-            # Compute loss
             outputs = model(pixel_values=pixel_values, labels=labels)
-            loss = outputs['loss']
-            running_loss += loss.item() * pixel_values.size(0)
+            running_loss += outputs['loss'].item() * pixel_values.size(0)
             
-            # Generate captions
-            generated_captions = model.generate_caption(pixel_values)
+            generated = model.generate_caption(pixel_values)
+            all_refs.extend(batch['captions'])
+            all_hyps.extend(generated)
             
-            # Store for metrics
-            for ref, hyp, cls in zip(batch['captions'], generated_captions, batch['class_names']):
-                all_references.append(ref)
-                all_hypotheses.append(hyp)
-                
-                # Save first 10 samples
-                if len(sample_results) < 10:
-                    sample_results.append({
-                        'class': cls,
-                        'reference': ref,
-                        'generated': hyp
-                    })
-    
-    epoch_loss = running_loss / len(dataloader.dataset)
-    
-    # Compute metrics
-    bleu1, bleu2, bleu3, bleu4 = compute_bleu_scores(all_references, all_hypotheses)
-    meteor = compute_meteor_score(all_references, all_hypotheses)
-    
-    return {
-        'loss': epoch_loss,
-        'bleu1': bleu1,
-        'bleu2': bleu2,
-        'bleu3': bleu3,
-        'bleu4': bleu4,
-        'meteor': meteor,
-        'sample_results': sample_results
-    }
-
+    val_loss = running_loss / len(dataloader.dataset)
+    metrics = compute_metrics(all_refs, all_hyps)
+    metrics['loss'] = val_loss
+    return metrics
 
 def main(args):
-    # Load config
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     
-    # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Set random seed
-    torch.manual_seed(config['seed'])
-    np.random.seed(config['seed'])
-    
-    # Create output directories
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / 'checkpoints').mkdir(exist_ok=True)
-    (output_dir / 'training_curves').mkdir(exist_ok=True)
-    (output_dir / 'sample_captions').mkdir(exist_ok=True)
+    ckpt_dir = output_dir / 'checkpoints'
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     
-    # Class names
-    class_names = config['classes']['names_nepali']
+    # Model
+    model = ViTCaptioner(
+        encoder_model=config['captioner']['encoder_model'],
+        decoder_model=config['captioner']['decoder_model'],
+        max_length=config['captioner']['max_length']
+    ).to(device)
     
-    # Create datasets
-    print("\n=== Loading Datasets ===")
-    train_dataset = SatelliteCaptioningDataset(
-        csv_file=f"{config['data']['processed_dir']}/train.csv",  # Use new dataset split
+    # Dataset
+    from functools import partial
+    collate_fn = partial(collate_fn_captioning, tokenizer=model.tokenizer, max_length=config['captioner']['max_length'])
+    
+    train_ds = SatelliteCaptioningDataset(
+        csv_file=f"{config['data']['processed_dir']}/train.csv",
         root_dir=config['data']['raw_dir'],
         transform=get_train_transforms(config['image']['size']),
         use_nepali_captions=True,
-        class_names_nepali=class_names
+        class_names_nepali=config['classes']['names_nepali']
     )
     
-    val_dataset = SatelliteCaptioningDataset(
+    val_ds = SatelliteCaptioningDataset(
         csv_file=f"{config['data']['processed_dir']}/valid.csv",
         root_dir=config['data']['raw_dir'],
         transform=get_val_transforms(config['image']['size']),
         use_nepali_captions=True,
-        class_names_nepali=class_names
+        class_names_nepali=config['classes']['names_nepali']
     )
     
-    # Check if resuming from checkpoint
+    train_loader = DataLoader(train_ds, batch_size=config['train_captioner']['batch_size'], shuffle=True, collate_fn=collate_fn, num_workers=config['num_workers'])
+    val_loader = DataLoader(val_ds, batch_size=config['evaluation']['batch_size'], shuffle=False, collate_fn=collate_fn, num_workers=config['num_workers'])
+    
+    optimizer = optim.AdamW(model.parameters(), lr=config['train_captioner']['learning_rate'])
+    # Use torch.amp.GradScaler('cuda') for modern PyTorch
+    scaler = torch.amp.GradScaler('cuda') if config['train_captioner'].get('mixed_precision', True) else None
+    
     start_epoch = 0
+    start_batch = 0
     checkpoint_info = None
     
-    if args.resume_from:
-        print(f"\n=== Resuming from Checkpoint: {args.resume_from} ===")
-        checkpoint_path = output_dir / 'checkpoints' / args.resume_from
-        
-        if not checkpoint_path.exists():
-            raise ValueError(f"Checkpoint not found: {checkpoint_path}")
-        
-        # Load model from checkpoint
-        model, loaded_epoch = ViTCaptioner.load_checkpoint(str(checkpoint_path), device=str(device))
-        checkpoint_info = torch.load(checkpoint_path / "checkpoint_info.pt", map_location=device, weights_only=False)
-        
-        start_epoch = loaded_epoch + 1
-        print(f"✓ Loaded checkpoint from epoch {loaded_epoch}")
-        print(f"✓ Will resume training from epoch {start_epoch + 1}")
-        
-        if 'metrics' in checkpoint_info:
-            metrics = checkpoint_info['metrics']
-            print(f"  Previous BLEU-4: {metrics.get('bleu4', 'N/A')}")
-            print(f"  Previous Loss: {metrics.get('loss', 'N/A')}")
-    else:
-        # Create model from scratch
-        print("\n=== Creating Model ===")
-        model = ViTCaptioner(
-            encoder_model=config['captioner']['encoder_model'],
-            decoder_model=config['captioner']['decoder_model'],
-            max_length=config['captioner']['max_length'],
-            num_beams=config['captioner']['num_beams']
-        )
-        model = model.to(device)
-    
-    # Create dataloaders with custom collate function
-    from functools import partial
-    collate_fn = partial(collate_fn_captioning, tokenizer=model.tokenizer, max_length=config['captioner']['max_length'])
-    
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['train_captioner']['batch_size'],
-        shuffle=True,
-        num_workers=config['num_workers'],
-        pin_memory=True,
-        collate_fn=collate_fn
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config['evaluation']['batch_size'],
-        shuffle=False,
-        num_workers=config['num_workers'],
-        pin_memory=True,
-        collate_fn=collate_fn
-    )
-    
-    # Optimizer
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=config['train_captioner']['learning_rate'],
-        weight_decay=config['train_captioner']['weight_decay']
-    )
-    
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=config['train_captioner']['epochs'],
-        eta_min=1e-6
-    )
-    
-    # Load optimizer and scheduler states if resuming
-    if checkpoint_info is not None and 'optimizer_state_dict' in checkpoint_info:
-        optimizer.load_state_dict(checkpoint_info['optimizer_state_dict'])
-        print("✓ Loaded optimizer state")
-        
-        # Step scheduler to the correct position
-        for _ in range(start_epoch):
-            scheduler.step()
-        print(f"✓ Advanced scheduler to epoch {start_epoch}")
-    
-    # Mixed precision scaler
-    scaler = torch.cuda.amp.GradScaler() if config['train_captioner']['mixed_precision'] else None
-    
-    # TensorBoard writer
+    # Handle resuming
+    if args.resume:
+        checkpoint_path = args.resume_from if args.resume_from else str(ckpt_dir / 'checkpoint_latest')
+        if os.path.exists(checkpoint_path):
+            print(f"Resuming from checkpoint: {checkpoint_path}")
+            # Modified load_checkpoint logic to also get batch and optimizer state
+            # We'll use a local load helper if the class method doesn't support everything
+            checkpoint_info = torch.load(os.path.join(checkpoint_path, 'checkpoint_info.pt'), map_location=device, weights_only=False)
+            
+            # Load model weights
+            from transformers import VisionEncoderDecoderModel
+            model.model = VisionEncoderDecoderModel.from_pretrained(checkpoint_path).to(device)
+            
+            start_epoch = checkpoint_info.get('epoch', 0)
+            start_batch = checkpoint_info.get('batch_idx', 0)
+            print(f"Resuming from Epoch {start_epoch + 1}, Batch {start_batch}")
+        else:
+            print(f"Warning: --resume specified but checkpoint not found at {checkpoint_path}")
+
+    # Overwrite with explicit args if provided
+    if args.resume_epoch is not None:
+        start_epoch = args.resume_epoch
+    if args.resume_batch is not None:
+        start_batch = args.resume_batch
+
+    # IMPORTANT: Create optimizer AFTER potential model restoration
+    # Otherwise, the optimizer will track orphaned parameters.
+    optimizer = optim.AdamW(model.parameters(), lr=config['train_captioner']['learning_rate'])
+    # Use torch.amp.GradScaler('cuda') for modern PyTorch
+    scaler = torch.amp.GradScaler('cuda') if config['train_captioner'].get('mixed_precision', True) else None
+
+    # Restore optimizer and scaler state if resuming
+    if checkpoint_info:
+        if 'optimizer_state_dict' in checkpoint_info:
+            optimizer.load_state_dict(checkpoint_info['optimizer_state_dict'])
+        if 'scaler_state_dict' in checkpoint_info and scaler is not None:
+            scaler.load_state_dict(checkpoint_info['scaler_state_dict'])
+
     writer = SummaryWriter(log_dir=output_dir / 'logs')
+    best_bleu4 = 0.0
     
-    # Training history
-    history = {
-        'train_loss': [],
-        'val_loss': [],
-        'bleu1': [],
-        'bleu2': [],
-        'bleu3': [],
-        'bleu4': [],
-        'meteor': [],
-        'lr': []
-    }
-    
-    # Load existing training history if resuming
-    history_file = output_dir / 'training_history.csv'
-    if args.resume_from and history_file.exists():
-        print("\n=== Loading Training History ===")
-        history_df = pd.read_csv(history_file)
+    # Define save callback for periodic saves
+    def save_checkpoint_callback(epoch, batch_idx, metrics=None):
+        latest_path = ckpt_dir / 'checkpoint_latest'
+        # We need to pass more state to save_checkpoint
+        # Since ViTCaptioner.save_checkpoint might not be flexible enough, 
+        # we'll add optimizer and batch_idx to the info
         
-        # Convert back to dictionary format
-        for key in history.keys():
-            if key in history_df.columns:
-                history[key] = history_df[key].tolist()
+        if latest_path.exists():
+            shutil.rmtree(latest_path)
         
-        print(f"✓ Loaded {len(history['train_loss'])} epochs of history")
-    
-    # Track best BLEU-4 (from history if resuming)
-    best_bleu4 = max(history['bleu4']) if history['bleu4'] else 0.0
+        model.save_checkpoint(str(latest_path), epoch=epoch, optimizer_state=optimizer.state_dict(), metrics=metrics)
+        
+        # Add batch_idx and scaler to the checkpoint_info.pt manually since model.save_checkpoint is limited
+        info_path = latest_path / 'checkpoint_info.pt'
+        info = torch.load(info_path, weights_only=False)
+        info['batch_idx'] = batch_idx
+        if scaler is not None:
+            info['scaler_state_dict'] = scaler.state_dict()
+        torch.save(info, info_path)
     
     print("\n=== Starting Training ===")
-    if args.resume_from:
-        print(f"Resuming from epoch {start_epoch + 1}/{config['train_captioner']['epochs']}")
-        print(f"Best BLEU-4 so far: {best_bleu4:.4f}")
-    
     for epoch in range(start_epoch, config['train_captioner']['epochs']):
         print(f"\nEpoch {epoch+1}/{config['train_captioner']['epochs']}")
-        print("-" * 50)
         
-        # Train
-        train_loss = train_one_epoch(model, train_loader, optimizer, device, scaler)
+        current_resume_batch = start_batch if epoch == start_epoch else 0
         
-        # Validate
-        val_metrics = validate(model, val_loader, device, class_names)
+        train_loss = train_one_epoch(
+            model, 
+            train_loader, 
+            optimizer, 
+            device, 
+            scaler, 
+            resume_batch=current_resume_batch,
+            save_callback=lambda idx: save_checkpoint_callback(epoch, idx)
+        )
+        val_metrics = validate(model, val_loader, device)
         
-        # Update history
-        history['train_loss'].append(train_loss)
-        history['val_loss'].append(val_metrics['loss'])
-        history['bleu1'].append(val_metrics['bleu1'])
-        history['bleu2'].append(val_metrics['bleu2'])
-        history['bleu3'].append(val_metrics['bleu3'])
-        history['bleu4'].append(val_metrics['bleu4'])
-        history['meteor'].append(val_metrics['meteor'])
-        history['lr'].append(optimizer.param_groups[0]['lr'])
+        # Log metrics
+        for k, v in val_metrics.items():
+            writer.add_scalar(f'Val/{k}', v, epoch)
+        writer.add_scalar('Train/Loss', train_loss, epoch)
         
-        # Print metrics
-        print(f"Train Loss: {train_loss:.4f}")
-        print(f"Val Loss: {val_metrics['loss']:.4f}")
-        print(f"BLEU-1: {val_metrics['bleu1']:.4f}, BLEU-2: {val_metrics['bleu2']:.4f}")
-        print(f"BLEU-3: {val_metrics['bleu3']:.4f}, BLEU-4: {val_metrics['bleu4']:.4f}")
-        print(f"METEOR: {val_metrics['meteor']:.4f}")
+        print(f"Metrics: {val_metrics}")
         
-        # TensorBoard logging
-        writer.add_scalar('Loss/train', train_loss, epoch)
-        writer.add_scalar('Loss/val', val_metrics['loss'], epoch)
-        writer.add_scalar('BLEU/bleu1', val_metrics['bleu1'], epoch)
-        writer.add_scalar('BLEU/bleu2', val_metrics['bleu2'], epoch)
-        writer.add_scalar('BLEU/bleu3', val_metrics['bleu3'], epoch)
-        writer.add_scalar('BLEU/bleu4', val_metrics['bleu4'], epoch)
-        writer.add_scalar('METEOR', val_metrics['meteor'], epoch)
-        writer.add_scalar('Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
+        # Storage Efficiency Strategy:
+        # 1. Always save 'last_epoch'
+        # 2. Save 'best_model' if improved
+        # 3. Delete previous 'last_epoch' if it exists (handled by overwriting or explicit deletion)
         
-        # Save sample captions
-        sample_file = output_dir / 'sample_captions' / f'epoch_{epoch+1}.json'
-        with open(sample_file, 'w', encoding='utf-8') as f:
-            json.dump(val_metrics['sample_results'], f, ensure_ascii=False, indent=2)
+        last_ckpt_path = ckpt_dir / 'last_epoch'
+        best_ckpt_path = ckpt_dir / 'best_model'
         
-        # Save best model (based on BLEU-4)
+        # Save Last
+        if last_ckpt_path.exists():
+            shutil.rmtree(last_ckpt_path) # Ensure clean save
+        model.save_checkpoint(str(last_ckpt_path), epoch=epoch, metrics=val_metrics)
+        
+        # Save Best
         if val_metrics['bleu4'] > best_bleu4:
             best_bleu4 = val_metrics['bleu4']
-            model.save_checkpoint(
-                str(output_dir / 'checkpoints' / 'best_bleu_model'),
-                epoch=epoch,
-                optimizer_state=optimizer.state_dict(),
-                metrics=val_metrics
-            )
-            print(f"✓ Saved best model (BLEU-4: {best_bleu4:.4f})")
-        
-        # Save checkpoint every N epochs
-        if (epoch + 1) % config['logging']['save_interval'] == 0:
-            model.save_checkpoint(
-                str(output_dir / 'checkpoints' / f'epoch_{epoch+1}'),
-                epoch=epoch,
-                optimizer_state=optimizer.state_dict(),
-                metrics=val_metrics
-            )
-        
-        # Update learning rate
-        scheduler.step()
-    
-    # Save final model
-    model.save_checkpoint(
-        str(output_dir / 'checkpoints' / 'last_epoch'),
-        epoch=config['train_captioner']['epochs'] - 1,
-        optimizer_state=optimizer.state_dict()
-    )
-    
-    # Save training history
-    history_df = pd.DataFrame(history)
-    history_df['epoch'] = range(1, len(history['train_loss']) + 1)
-    history_df.to_csv(output_dir / 'training_history.csv', index=False)
-    
-    # Plot training curves
-    plot_training_curves(history, output_dir / 'training_curves' / 'training_progress.png')
-    
-    # Close writer
-    writer.close()
-    
-    print("\n=== Training Complete ===")
-    print(f"Best BLEU-4 score: {best_bleu4:.4f}")
-    print(f"Results saved to: {output_dir}")
+            if best_ckpt_path.exists():
+                shutil.rmtree(best_ckpt_path)
+            model.save_checkpoint(str(best_ckpt_path), epoch=epoch, metrics=val_metrics)
+            print(f"New Best BLEU-4: {best_bleu4:.4f}")
 
+    writer.close()
+    print(f"Training complete. Best BLEU-4: {best_bleu4:.4f}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train satellite image captioning model")
-    parser.add_argument('--config', type=str, default='configs/config.yaml', help='Path to config file')
-    parser.add_argument('--output_dir', type=str, default='outputs/captioning', help='Output directory')
-    parser.add_argument('--resume_from', type=str, default=None, help='Checkpoint directory name to resume from (e.g., "epoch_8" or "best_bleu_model")')
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='configs/config.yaml')
+    parser.add_argument('--output_dir', type=str, default='outputs/captioning_refined')
+    parser.add_argument('--resume', action='store_true', help='Resume training from latest checkpoint')
+    parser.add_argument('--resume_from', type=str, default=None, help='Specific checkpoint directory to resume from')
+    parser.add_argument('--resume_epoch', type=int, default=None, help='Explicit epoch to start from (0-indexed)')
+    parser.add_argument('--resume_batch', type=int, default=None, help='Explicit batch to start from (0-indexed)')
     args = parser.parse_args()
     main(args)

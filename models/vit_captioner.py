@@ -49,15 +49,18 @@ class ViTCaptioner(nn.Module):
             decoder_model
         )
         
-        # Initialize tokenizer first
+        # Initialize tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(decoder_model)
+        
+        # Ensure pad token exists (BLOOM has one natively, GPT-2 does not)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
         # Set model config tokens
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
-        self.model.config.decoder_start_token_id = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
+        self.model.config.decoder_start_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.eos_token_id
         self.model.config.eos_token_id = self.tokenizer.eos_token_id
+        self.model.config.vocab_size = self.model.config.decoder.vocab_size
         
         # Generation config
         self.generation_config = GenerationConfig(
@@ -221,7 +224,8 @@ class ViTCaptioner(nn.Module):
         # Load pretrained weights
         model.model = VisionEncoderDecoderModel.from_pretrained(path)
         model.tokenizer = AutoTokenizer.from_pretrained(path)
-        model.tokenizer.pad_token = model.tokenizer.eos_token
+        if model.tokenizer.pad_token is None:
+            model.tokenizer.pad_token = model.tokenizer.eos_token
         
         model.to(device)
         
